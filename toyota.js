@@ -10,13 +10,17 @@ const graphHost = 'oa-api.telematicsct.com';
 const graph = 'https://' + graphHost + '/graphql';
 const appSyncKey = 'da2-zgeayo2qh5eo7cj6pmdwhwugze';
 const resolverKey = 'pypIHG015k4ABHWbcI4G0a94F7cC0JDo1OynpAsG';
+const opening = '{ position { status } }';
+const lockedOpening = '{ lock { status } position { status } }';
 const statusQuery = `query GetVehicleStatus($vin: String!) {
-  getVehicleStatus(vin: $vin) { vin vehicleState { doors {
-    driverSide { lock { status } }
-    passengerSide { lock { status } }
-    rearDriverSide { lock { status } }
-    rearPassengerSide { lock { status } }
-  } } }
+  getVehicleStatus(vin: $vin) { vin vehicleState {
+    doors { driverSide ${lockedOpening} passengerSide ${lockedOpening}
+      rearDriverSide ${lockedOpening} rearPassengerSide ${lockedOpening} }
+    windows { driverSide ${opening} passengerSide ${opening} rearDriverSide ${opening} rearPassengerSide ${opening} }
+    hatch ${lockedOpening} trunk ${lockedOpening} tailgate ${lockedOpening}
+    hood ${opening} moonroof ${opening}
+    engine { running status }
+  } }
 }`;
 const subscribeQuery = `subscription ReceiveRemoteCommandStatus($vin: String!) {
   onPostRemoteCallback(vin: $vin) { appRequestNo status vin command commandEnded }
@@ -28,17 +32,37 @@ const commandQuery = `mutation SendRemoteCommand($command: String!, $autoFixComm
   }
 }`;
 
+const doorCaps = ['dlockUnlockCapable', 'doorLockUnlockCapable'];
+const hatchCaps = ['trunkLockUnlockCapable', 'powerTailgateCapable'];
+// caps: Toyota capability flags. explicit: a flag must be true, as Toyota's app requires.
+// confirm: how a status read proves the command worked when Toyota's reply is ambiguous.
 const commands = {
-  lock: { name: 'door-lock', code: 'DL', value: 1 },
-  unlock: { name: 'door-unlock', code: 'DL', value: 2 },
-  start: { name: 'engine-start', code: 'RES', value: 1 },
-  stop: { name: 'engine-stop', code: 'RES', value: 2 },
+  lock: { name: 'door-lock', code: 'DL', value: 1, caps: doorCaps, confirm: (s) => s.locked === true },
+  unlock: { name: 'door-unlock', code: 'DL', value: 2, caps: doorCaps, confirm: (s) => s.locked === false },
+  start: { name: 'engine-start', code: 'RES', value: 1, caps: ['estartEnabled', 'estartStopCapable', 'remoteEngineStartStop'] },
+  stop: { name: 'engine-stop', code: 'RES', value: 2, caps: ['estopEnabled', 'estartStopCapable', 'remoteEngineStartStop'] },
+  hazards: { name: 'hazard-on', code: 'HZ', value: 1, caps: ['hazardCapable'] },
+  horn: { name: 'sound-horn', caps: ['hornCapable'], explicit: true },
+  buzzer: { name: 'buzzer-warning', caps: ['buzzerCapable'], explicit: true },
+  hatchLock: { name: 'trunk-lock', caps: hatchCaps, explicit: true, confirm: (s) => s.hatchLocked === true },
+  hatchUnlock: { name: 'trunk-unlock', caps: hatchCaps, explicit: true, confirm: (s) => s.hatchLocked === false },
+  closeWindows: { name: 'power-window-close', caps: ['powerWindowsCloseCapable'], explicit: true },
 };
 const confirmWindowMs = 60_000;
 const vehicleCacheMs = 10 * 60_000;
 const confirmPollMs = 5_000;
-const doors = new Set(['driver side door', 'passenger side door', 'driver side rear door', 'passenger side rear door']);
-const graphDoors = ['driverSide', 'passengerSide', 'rearDriverSide', 'rearPassengerSide'];
+const doorLocks = new Set(['driver side door', 'passenger side door', 'driver side rear door', 'passenger side rear door']);
+// REST status sections by "category section"; the rear doors are the Sienna's sliding doors.
+const restOpenings = {
+  'driver side door': 'doors', 'passenger side door': 'doors',
+  'driver side rear door': 'slidingDoors', 'passenger side rear door': 'slidingDoors',
+  'driver side window': 'windows', 'passenger side window': 'windows',
+  'driver side rear window': 'windows', 'passenger side rear window': 'windows',
+};
+// Toyota's app finds these sections by name in any category.
+const restAnyCategory = { hatch: 'hatch', trunk: 'hatch', tailgate: 'hatch', hood: 'hood', bonnet: 'hood', moonroof: 'moonroof' };
+const graphDoors = { driverSide: 'doors', passengerSide: 'doors', rearDriverSide: 'slidingDoors', rearPassengerSide: 'slidingDoors' };
+const openingNames = ['doors', 'slidingDoors', 'windows', 'hatch', 'hood', 'moonroof'];
 
 function lockValue(value) {
   switch (String(value).toLowerCase()) {
@@ -50,31 +74,97 @@ function lockValue(value) {
   }
 }
 
-function combineLocks(values) {
+function closedValue(value) {
+  switch (String(value).toLowerCase()) {
+    case 'close':
+    case 'closed': return true;
+    case 'open':
+    case 'opened': return false;
+    default: return null;
+  }
+}
+
+function engineValue(value) {
+  const state = String(value).toLowerCase();
+  if (['on', 'running', 'started', 'true', '1'].includes(state)) return true;
+  return ['off', 'stopped', 'false', '0'].includes(state) ? false : null;
+}
+
+// false (unlocked, open) wins, so one open door makes the whole group open.
+function combine(values) {
   if (values.includes(false)) return false;
   return values.includes(true) ? true : null;
 }
 
-function restDoorLocks(status) {
-  const categories = status?.vehicleStatus ?? status?.status?.vehicleStatus;
-  if (!Array.isArray(categories)) return null;
-  const locks = [];
-  for (const category of categories) {
-    if (!Array.isArray(category?.sections)) continue;
-    for (const section of category.sections) {
-      if (!doors.has(`${category.category} ${section?.section}`.toLowerCase())
-        || !Array.isArray(section?.values)) continue;
-      const entries = section.values.filter((item) => item && lockValue(item.value) !== null);
-      const active = entries.filter((item) => item.status === 1);
-      const fallback = entries.filter((item) => lockValue(item.value) || !Object.hasOwn(item, 'status'));
-      const candidates = new Set((active.length ? active : fallback).map((item) => lockValue(item.value)));
-      if (candidates.size === 1) locks.push(candidates.values().next().value);
-    }
-  }
-  return combineLocks(locks);
+function sectionLock(values) {
+  const entries = values.filter((item) => item && lockValue(item.value) !== null);
+  const active = entries.filter((item) => item.status === 1);
+  const fallback = entries.filter((item) => lockValue(item.value) || !Object.hasOwn(item, 'status'));
+  const candidates = new Set((active.length ? active : fallback).map((item) => lockValue(item.value)));
+  return candidates.size === 1 ? candidates.values().next().value : null;
 }
 
-function checkCommand(vehicle, action) {
+function sectionClosed(values) {
+  const position = values.map((item) => closedValue(item?.value)).find((value) => value !== null);
+  if (position !== undefined) return position;
+  // Toyota's app shows an opening as closed when it reports only a lock state.
+  return values.length && values.every((item) => lockValue(item?.value) !== null) ? true : null;
+}
+
+function collect() {
+  return { locks: [], hatchLocks: [], ...Object.fromEntries(openingNames.map((name) => [name, []])) };
+}
+
+function summarize(found) {
+  return {
+    locked: combine(found.locks), hatchLocked: combine(found.hatchLocks),
+    ...Object.fromEntries(openingNames.map((name) => [name, combine(found[name])])),
+  };
+}
+
+function restStatus(status) {
+  const categories = status?.vehicleStatus ?? status?.status?.vehicleStatus;
+  const found = collect();
+  const named = new Set();
+  for (const category of Array.isArray(categories) ? categories : []) {
+    if (!Array.isArray(category?.sections)) continue;
+    const categoryName = String(category.category).toLowerCase();
+    for (const section of category.sections) {
+      if (!Array.isArray(section?.values)) continue;
+      const sectionName = String(section.section).toLowerCase();
+      const key = `${categoryName} ${sectionName}`;
+      if (doorLocks.has(key)) found.locks.push(sectionLock(section.values));
+      const anyCategory = restAnyCategory[sectionName];
+      if (restOpenings[key]) {
+        found[restOpenings[key]].push(sectionClosed(section.values));
+      } else if (anyCategory && !named.has(sectionName)) {
+        // The app reads the first section with each name, and cargo locks only under Other.
+        named.add(sectionName);
+        found[anyCategory].push(sectionClosed(section.values));
+        if (anyCategory === 'hatch' && categoryName === 'other') found.hatchLocks.push(sectionLock(section.values));
+      }
+    }
+  }
+  return summarize(found);
+}
+
+function graphStatus(state) {
+  const found = collect();
+  for (const [door, name] of Object.entries(graphDoors)) {
+    found.locks.push(lockValue(state?.doors?.[door]?.lock?.status));
+    found[name].push(closedValue(state?.doors?.[door]?.position?.status));
+  }
+  for (const window of Object.values(state?.windows ?? {})) found.windows.push(closedValue(window?.position?.status));
+  for (const cargo of ['hatch', 'trunk', 'tailgate']) {
+    found.hatch.push(closedValue(state?.[cargo]?.position?.status));
+    found.hatchLocks.push(lockValue(state?.[cargo]?.lock?.status));
+  }
+  found.hood.push(closedValue(state?.hood?.position?.status));
+  found.moonroof.push(closedValue(state?.moonroof?.position?.status));
+  return { ...summarize(found), running: engineValue(state?.engine?.running ?? state?.engine?.status) };
+}
+
+function checkCommand(vehicle, command) {
   const remote = vehicle.remoteSubscriptionStatus;
   const status = vehicle.subscriptionStatus;
   const active = typeof remote === 'string' && remote
@@ -86,13 +176,14 @@ function checkCommand(vehicle, action) {
     || (vehicle.features && vehicle.features.remoteCommands !== 1)) {
     throw new Error('Toyota reports remote commands unavailable for this vehicle.');
   }
-  const keys = ['start', 'stop'].includes(action)
-    ? ['estartEnabled', 'estartStopCapable', 'remoteEngineStartStop']
-    : ['dlockUnlockCapable', 'doorLockUnlockCapable'];
-  const reported = keys.flatMap((key) => [
+  const flags = command.caps.flatMap((key) => [
     vehicle.remoteServiceCapabilities?.[key], vehicle.extendedCapabilities?.[key],
-  ]).find((value) => typeof value === 'boolean');
-  if (reported === false || (['NG86', 'GR86'].includes(vehicle.generation) && reported !== true)) {
+  ]);
+  const reported = command.explicit
+    ? (flags.includes(true) || undefined)
+    : flags.find((value) => typeof value === 'boolean');
+  const explicit = command.explicit || ['NG86', 'GR86'].includes(vehicle.generation);
+  if (reported === false || (explicit && reported !== true)) {
     throw new Error('Toyota reports this command is unsupported for this vehicle.');
   }
 }
@@ -184,23 +275,35 @@ class ToyotaClient {
         }, true);
         const reported = data?.getVehicleStatus;
         if (reported?.vin && reported.vin !== vin) throw new Error('Toyota returned status for a different vehicle.');
-        const states = reported?.vehicleState?.doors;
-        return { locked: combineLocks(graphDoors.map((door) => lockValue(states?.[door]?.lock?.status))) };
+        return graphStatus(reported?.vehicleState);
       }
-      const path = route ? '/v1/remote/route/status'
-        : legacy ? '/oneapi/v2/legacy/remote/status' : '/oneapi/v1/global/remote/status';
-      return { locked: restDoorLocks(await this.api(gateway + path, vehicle)) };
+      const base = route ? '/v1/remote/route/'
+        : legacy ? '/oneapi/v1/legacy/remote/' : '/oneapi/v1/global/remote/';
+      const [status, engine] = await Promise.all([
+        this.api(gateway + (legacy ? '/oneapi/v2/legacy/remote/status' : base + 'status'), vehicle),
+        // Engine status is optional; doors and locks still matter when it fails.
+        this.api(gateway + base + 'engine-status', vehicle).catch(() => null),
+      ]);
+      const engineState = typeof engine?.status === 'object' ? engine.status : engine;
+      return { ...restStatus(status), running: engineValue(engineState?.status) };
     }
 
     if (!Object.hasOwn(commands, action)) throw new Error('Unsupported Toyota command.');
-    checkCommand(vehicle, action);
     const command = commands[action];
+    checkCommand(vehicle, command);
+    // Toyota's app sends no hatch lock over AppSync, and legacy vehicles only take coded commands.
+    if ((appSync && action === 'hatchLock') || (legacy && !command.code)) {
+      throw new Error('Toyota reports this command is unsupported for this vehicle.');
+    }
     if (appSync) return this.appSyncCommand(vehicle, command.name);
 
-    const path = route ? '/v1/remote/route/command'
+    // Newer commands without a legacy code use the route endpoint on every REST generation.
+    const viaRoute = route || !command.code;
+    const path = viaRoute ? '/v1/remote/route/command'
       : legacy ? '/oneapi/v1/legacy/remote/command' : '/oneapi/v1/global/remote/command';
     let body = { command: command.name };
-    if (route) body.autoFixPopup = false;
+    if (viaRoute) body.autoFixPopup = false;
+    if (action === 'buzzer') body.beepCount = 10;
     if (legacy) {
       const session = await this.session.get();
       body = {
@@ -212,13 +315,13 @@ class ToyotaClient {
     if (result.returnCode && result.returnCode !== 'ONE-RES-10000') {
       const code = String(result.returnCode);
       const safeCode = /^[\w-]{1,32}$/.test(code) ? ` (${code})` : '';
-      if (['lock', 'unlock'].includes(action)) {
+      if (command.confirm) {
         // Toyota often replies before the vehicle acts (~30s), so poll status. Read only;
         // never submit a second command to resolve an ambiguous outcome.
         for (let waited = 0; waited <= confirmWindowMs; waited += confirmPollMs) {
           if (waited) await sleep(confirmPollMs);
           const status = await this.run(vin, 'status').catch(() => null);
-          if (status?.locked === (action === 'lock')) return;
+          if (status && command.confirm(status)) return;
         }
       }
       throw new Error(`Toyota did not confirm the remote command${safeCode}.`);

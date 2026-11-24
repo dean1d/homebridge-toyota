@@ -28,6 +28,36 @@
         "type": "boolean",
         "title": "Show remote start",
         "default": true
+      },
+      "showOpenings": {
+        "type": "boolean",
+        "title": "Show door, window, hatch, hood and moonroof sensors",
+        "default": true
+      },
+      "showHatch": {
+        "type": "boolean",
+        "title": "Show hatch lock and unlock",
+        "default": false
+      },
+      "showHazards": {
+        "type": "boolean",
+        "title": "Show flash hazards",
+        "default": false
+      },
+      "showHorn": {
+        "type": "boolean",
+        "title": "Show sound horn",
+        "default": false
+      },
+      "showBuzzer": {
+        "type": "boolean",
+        "title": "Show find vehicle (buzzer)",
+        "default": false
+      },
+      "showCloseWindows": {
+        "type": "boolean",
+        "title": "Show close windows",
+        "default": false
       }
     }
   }

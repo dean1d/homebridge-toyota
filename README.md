@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/homebridge-toyota)](https://www.npmjs.com/package/homebridge-toyota)
 [![npm weekly downloads](https://img.shields.io/npm/dw/homebridge-toyota)](https://www.npmjs.com/package/homebridge-toyota)
 
-A Homebridge accessory for Toyota Remote Connect. Apple Home gets a door lock control and momentary remote-start and remote-stop switches. The lock reads Toyota's last reported status, which can lag behind the vehicle. Lock and unlock wait up to 60 seconds for that status to confirm the change. The plugin reuses a status for 30 seconds, so opening Apple Home repeatedly doesn't flood Toyota with requests.
+A Homebridge accessory for Toyota Remote Connect. Apple Home gets a door lock, a remote-start switch that shows whether the engine is running (turn it off to stop the engine), and contact sensors for the doors, sliding doors, windows, hatch, hood and moonroof. Optional controls add hatch lock and unlock, flash hazards, sound horn, find vehicle (buzzer) and close windows. Toyota's capability flags decide which of these your vehicle accepts. The lock reads Toyota's last reported status, which can lag behind the vehicle. Lock and unlock wait up to 60 seconds for that status to confirm the change. The plugin reuses a status for 30 seconds, so opening Apple Home repeatedly doesn't flood Toyota with requests.
 
 ## Requirements
 
@@ -17,7 +17,7 @@ Install **Toyota Remote Connect** from the Homebridge Plugins tab and open its s
 
 1. Enter your Toyota account email and password, then select **Sign in to Toyota**. Enter the verification code if Toyota requests one.
 2. Select the VIN for your vehicle. If Toyota returns one vehicle, its VIN is filled in automatically.
-3. Under **Show in Apple Home**, choose **Door lock and unlock**, **Remote start** (which also adds a remote-stop switch), or both. Both controls are enabled by default.
+3. Under **Show in Apple Home**, choose the controls to show. Door lock, remote start and the opening sensors are on by default. Hatch, hazards, horn, buzzer and close windows are off until you turn them on.
 4. Select **Save Toyota settings** and restart Homebridge.
 
 Toyota credentials are used for sign-in. The plugin saves the resulting session under Homebridge's storage directory, where it can refresh the session as needed. Keep that session file private.
@@ -34,11 +34,17 @@ Add an entry to the existing Homebridge `accessories` array. The default session
   "name": "Sienna",
   "vin": "YOUR_17_CHARACTER_VIN",
   "showDoorLock": true,
-  "showRemoteStart": true
+  "showRemoteStart": true,
+  "showOpenings": true,
+  "showHatch": false,
+  "showHazards": false,
+  "showHorn": false,
+  "showBuzzer": false,
+  "showCloseWindows": false
 }
 ```
 
-Restart Homebridge and open Apple Home. Test the door lock with the Sienna in view. Test remote start outdoors with the vehicle empty. The start and stop switches reset after each request. If Apple Home times out, check the Toyota app before trying again. Keep the remote-start switch out of unattended automations.
+Restart Homebridge and open Apple Home. Test the door lock with the Sienna in view. Test remote start outdoors with the vehicle empty. The remote-start switch shows the requested state for a minute, then follows Toyota's engine status. The hazards, horn, buzzer and close-windows switches reset after each request. Sensors update when Apple Home reads them, so they don't send open-door notifications on their own. If Apple Home times out, check the Toyota app before trying again. Keep the remote-start switch out of unattended automations.
 
 
 ## Support

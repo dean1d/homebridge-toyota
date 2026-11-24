@@ -6,6 +6,7 @@ const { sessionPath } = require('./settings');
 
 const lockRepeatWindowMs = 30_000;
 const statusCacheMs = 30_000;
+const engineHoldMs = 60_000;
 
 module.exports = (api) => api.registerAccessory('homebridge-toyota', 'Toyota', Toyota);
 
@@ -47,16 +48,19 @@ class Toyota {
     let lastLockWrite;
     let statusRequest;
     let lastStatus;
-    const readLock = async () => {
-      if (lastStatus && performance.now() < lastStatus.until) return lastStatus.locked;
-      statusRequest ??= call('status').then(({ locked }) => {
-        lastStatus = { locked, until: performance.now() + statusCacheMs };
-        return locked;
+    const readStatus = async () => {
+      if (lastStatus && performance.now() < lastStatus.until) return lastStatus.status;
+      statusRequest ??= call('status').then((status) => {
+        lastStatus = { status, until: performance.now() + statusCacheMs };
+        return status;
       }).finally(() => {
         statusRequest = undefined;
       });
       return statusRequest;
     };
+    const readLock = async () => (await readStatus()).locked;
+    // A command sent from Home changes the vehicle; read fresh status afterwards.
+    const send = (action) => call(action).finally(() => { lastStatus = undefined; });
     lock.getCharacteristic(C.LockCurrentState).onGet(async () => {
       const locked = await readLock();
       if (locked === null) return C.LockCurrentState.UNKNOWN;
@@ -103,7 +107,7 @@ class Toyota {
       service.getCharacteristic(C.On).onGet(() => false).onSet(async (on) => {
         if (!on) return;
         try {
-          await call(action);
+          await send(action);
         } finally {
           const reset = setTimeout(() => service.updateCharacteristic(C.On, false), 200);
           reset.unref();
@@ -111,8 +115,55 @@ class Toyota {
       });
       return service;
     };
-    const start = momentary('Remote Start', 'remote-start', 'start');
-    const stop = momentary('Remote Stop', 'remote-stop', 'stop');
+
+    // On starts the engine and off stops it. Toyota's engine status lags, so the
+    // requested state is shown for a minute after each command.
+    const start = new Service.Switch(`${name} Remote Start`, 'remote-start');
+    let engineHold;
+    start.getCharacteristic(C.On)
+      .onGet(async () => {
+        if (engineHold && performance.now() < engineHold.until) return engineHold.on;
+        return (await readStatus()).running === true;
+      })
+      .onSet(async (on) => {
+        await send(on ? 'start' : 'stop');
+        engineHold = { on: Boolean(on), until: performance.now() + engineHoldMs };
+      });
+
+    const hatch = new Service.LockMechanism(`${name} Hatch`, 'hatch');
+    let hatchHold;
+    const hatchState = async (states) => {
+      if (hatchHold && performance.now() < hatchHold.until) return hatchHold.secured ? states.SECURED : states.UNSECURED;
+      const locked = (await readStatus()).hatchLocked;
+      if (locked === null) return states.UNKNOWN ?? states.SECURED;
+      return locked ? states.SECURED : states.UNSECURED;
+    };
+    hatch.getCharacteristic(C.LockCurrentState).onGet(() => hatchState(C.LockCurrentState));
+    hatch.getCharacteristic(C.LockTargetState)
+      .onGet(() => hatchState(C.LockTargetState))
+      .onSet(async (value) => {
+        const secured = value === C.LockTargetState.SECURED;
+        if (!secured && value !== C.LockTargetState.UNSECURED) {
+          throw new HapStatusError(HAPStatus.INVALID_VALUE_IN_REQUEST);
+        }
+        await send(secured ? 'hatchLock' : 'hatchUnlock');
+        hatchHold = { secured, until: performance.now() + engineHoldMs };
+        hatch.updateCharacteristic(C.LockCurrentState, secured ? C.LockCurrentState.SECURED : C.LockCurrentState.UNSECURED);
+      });
+
+    // Contact sensors read "closed" unless Toyota reports the opening open, as Toyota's app does.
+    const openings = [
+      ['doors', 'Front Doors'], ['slidingDoors', 'Sliding Doors'], ['windows', 'Windows'],
+      ['hatch', 'Hatch Open'], ['hood', 'Hood'], ['moonroof', 'Moonroof'],
+    ].map(([key, label]) => {
+      const sensor = new Service.ContactSensor(`${name} ${label}`, `opening-${key}`);
+      sensor.getCharacteristic(C.ContactSensorState).onGet(async () => (
+        (await readStatus())[key] === false
+          ? C.ContactSensorState.CONTACT_NOT_DETECTED
+          : C.ContactSensorState.CONTACT_DETECTED
+      ));
+      return sensor;
+    });
 
     if (valid) {
       client.vehicles().then((vehicles) => {
@@ -123,7 +174,13 @@ class Toyota {
 
     this.services = [info];
     if (config.showDoorLock !== false) this.services.push(lock);
-    if (config.showRemoteStart !== false) this.services.push(start, stop);
+    if (config.showRemoteStart !== false) this.services.push(start);
+    if (config.showOpenings !== false) this.services.push(...openings);
+    if (config.showHatch === true) this.services.push(hatch);
+    if (config.showHazards === true) this.services.push(momentary('Flash Hazards', 'hazards', 'hazards'));
+    if (config.showHorn === true) this.services.push(momentary('Sound Horn', 'horn', 'horn'));
+    if (config.showBuzzer === true) this.services.push(momentary('Find Vehicle', 'buzzer', 'buzzer'));
+    if (config.showCloseWindows === true) this.services.push(momentary('Close Windows', 'close-windows', 'closeWindows'));
   }
 
   getServices() {

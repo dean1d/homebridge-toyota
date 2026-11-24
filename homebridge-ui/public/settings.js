@@ -80,6 +80,12 @@
       vin,
       showDoorLock: field('door-lock').checked,
       showRemoteStart: field('remote-start').checked,
+      showOpenings: field('openings').checked,
+      showHatch: field('hatch').checked,
+      showHazards: field('hazards').checked,
+      showHorn: field('horn').checked,
+      showBuzzer: field('buzzer').checked,
+      showCloseWindows: field('close-windows').checked,
     };
     if (signedInVehicles) delete config.sessionFile;
     if (index < 0) blocks.push(config);
@@ -96,6 +102,12 @@
     field('vin').value = config.vin ?? '';
     field('door-lock').checked = config.showDoorLock !== false;
     field('remote-start').checked = config.showRemoteStart !== false;
+    field('openings').checked = config.showOpenings !== false;
+    field('hatch').checked = config.showHatch === true;
+    field('hazards').checked = config.showHazards === true;
+    field('horn').checked = config.showHorn === true;
+    field('buzzer').checked = config.showBuzzer === true;
+    field('close-windows').checked = config.showCloseWindows === true;
     form.querySelector('button[type=submit]').disabled = false;
   })().catch(() => showStatus('Could not load Toyota settings.'));
 })();
