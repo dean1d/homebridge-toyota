@@ -13,47 +13,26 @@
   </form>
   <p id="status" role="status" aria-live="polite"></p>
   <form id="settings-form">
-    <label class="form-label" for="name">Accessory name</label>
-    <input class="form-control mb-2" id="name" required>
-    <label class="form-label" for="vin">Vehicle VIN</label>
-    <input class="form-control mb-3" id="vin" list="vehicles" maxlength="17" pattern="[A-HJ-NPR-Z0-9a-hj-npr-z0-9]{17}" required>
     <datalist id="vehicles"></datalist>
-    <fieldset class="mb-3">
-      <legend class="fs-6">Show in Apple Home</legend>
-      <div class="form-check">
-        <input class="form-check-input" id="door-lock" type="checkbox">
-        <label class="form-check-label" for="door-lock">Door lock and unlock</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="remote-start" type="checkbox">
-        <label class="form-check-label" for="remote-start">Remote start</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="openings" type="checkbox">
-        <label class="form-check-label" for="openings">Door, window, hatch, hood and moonroof sensors</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="hatch" type="checkbox">
-        <label class="form-check-label" for="hatch">Hatch lock and unlock</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="hazards" type="checkbox">
-        <label class="form-check-label" for="hazards">Flash hazards</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="horn" type="checkbox">
-        <label class="form-check-label" for="horn">Sound horn</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="buzzer" type="checkbox">
-        <label class="form-check-label" for="buzzer">Find vehicle (buzzer)</label>
-      </div>
-      <div class="form-check">
-        <input class="form-check-input" id="close-windows" type="checkbox">
-        <label class="form-check-label" for="close-windows">Close windows</label>
-      </div>
-    </fieldset>
+    <div id="cars"></div>
+    <button class="btn btn-secondary me-2" id="add-car" type="button">Add vehicle</button>
     <button class="btn btn-primary" type="submit" disabled>Save Toyota settings</button>
   </form>
+  <template id="car-template">
+    <fieldset class="card card-body mb-3">
+      <legend class="fs-6">Vehicle</legend>
+      <label class="form-label">Name in Apple Home
+        <input class="form-control mb-2" data-field="name" required>
+      </label>
+      <label class="form-label">Vehicle VIN
+        <input class="form-control mb-3" data-field="vin" list="vehicles" maxlength="17" pattern="[A-HJ-NPR-Z0-9a-hj-npr-z0-9]{17}" required>
+      </label>
+      <fieldset class="mb-2">
+        <legend class="fs-6">Show in Apple Home</legend>
+        <div data-options></div>
+      </fieldset>
+      <div><button class="btn btn-outline-danger btn-sm" data-remove type="button">Remove vehicle</button></div>
+    </fieldset>
+  </template>
 </div>
 <script src="settings.js"></script>

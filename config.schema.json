@@ -1,7 +1,6 @@
 {
   "pluginAlias": "Toyota",
   "pluginType": "accessory",
-  "singular": true,
   "customUi": true,
   "schema": {
     "type": "object",

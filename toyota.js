@@ -257,7 +257,8 @@ class ToyotaClient {
     return vehicles;
   }
 
-  async run(vin, action) {
+  // note(message) receives progress for the log: Toyota replies and vehicle confirmation.
+  async run(vin, action, note = () => {}) {
     const matches = (await this.vehicles()).filter((vehicle) => vehicle?.vin === vin);
     if (matches.length !== 1) throw new Error('The configured VIN was not found on your Toyota account.');
     const vehicle = { ...matches[0], generation: String(matches[0].generation ?? '').trim().toUpperCase() };
@@ -295,7 +296,7 @@ class ToyotaClient {
     if ((appSync && action === 'hatchLock') || (legacy && !command.code)) {
       throw new Error('Toyota reports this command is unsupported for this vehicle.');
     }
-    if (appSync) return this.appSyncCommand(vehicle, command.name);
+    if (appSync) return this.appSyncCommand(vehicle, command.name, note);
 
     // Newer commands without a legacy code use the route endpoint on every REST generation.
     const viaRoute = route || !command.code;
@@ -312,23 +313,29 @@ class ToyotaClient {
       };
     }
     const result = await this.api(gateway + path, vehicle, body);
-    if (result.returnCode && result.returnCode !== 'ONE-RES-10000') {
-      const code = String(result.returnCode);
-      const safeCode = /^[\w-]{1,32}$/.test(code) ? ` (${code})` : '';
-      if (command.confirm) {
-        // Toyota often replies before the vehicle acts (~30s), so poll status. Read only;
-        // never submit a second command to resolve an ambiguous outcome.
-        for (let waited = 0; waited <= confirmWindowMs; waited += confirmPollMs) {
-          if (waited) await sleep(confirmPollMs);
-          const status = await this.run(vin, 'status').catch(() => null);
-          if (status && command.confirm(status)) return;
+    const code = String(result.returnCode ?? '');
+    const safeCode = /^[\w-]{1,32}$/.test(code) ? ` (${code})` : '';
+    if (!code || code === 'ONE-RES-10000') {
+      note(`Toyota accepted ${command.name}${safeCode}.`);
+      return;
+    }
+    if (command.confirm) {
+      note(`Toyota replied${safeCode} before the vehicle acted; checking status for up to ${confirmWindowMs / 1000}s.`);
+      // Toyota often replies before the vehicle acts (~30s), so poll status. Read only;
+      // never submit a second command to resolve an ambiguous outcome.
+      for (let waited = 0; waited <= confirmWindowMs; waited += confirmPollMs) {
+        if (waited) await sleep(confirmPollMs);
+        const status = await this.run(vin, 'status').catch(() => null);
+        if (status && command.confirm(status)) {
+          note(`Vehicle confirmed ${command.name} after ${waited / 1000}s.`);
+          return;
         }
       }
-      throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
     }
+    throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
   }
 
-  async appSyncCommand(vehicle, command) {
+  async appSyncCommand(vehicle, command, note) {
     const { vin } = vehicle;
     const session = await this.session.get();
     const authorization = {
@@ -381,6 +388,7 @@ class ToyotaClient {
       }, true);
       const execution = data?.executeRemoteCommand?.payload;
       if (!execution?.correlationId) throw new Error('Toyota did not accept the remote command.');
+      note(`Toyota accepted ${command}; waiting for the vehicle.`);
       await waitFor((message) => {
         if (message.type !== 'data' || message.id !== id) return false;
         const update = message.payload?.data?.onPostRemoteCallback;
@@ -388,7 +396,10 @@ class ToyotaClient {
           && String(execution.requestNo) !== String(update.appRequestNo))) return false;
         if (update.command && update.command !== command && update.appRequestNo == null) return false;
         const state = String(update.status).toLowerCase();
-        if (state === 'completed') return true;
+        if (state === 'completed') {
+          note(`Vehicle completed ${command}.`);
+          return true;
+        }
         if (state === 'in_progress' && !update.commandEnded) return false;
         throw new Error('Toyota did not complete the remote command.');
       });
