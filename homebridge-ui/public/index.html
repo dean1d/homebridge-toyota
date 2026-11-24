@@ -1,0 +1,35 @@
+<div class="container-fluid">
+  <form id="login-form" class="mb-3">
+    <label class="form-label" for="email">Toyota account email</label>
+    <input class="form-control mb-2" id="email" type="email" autocomplete="username" required>
+    <label class="form-label" for="password">Toyota password</label>
+    <input class="form-control mb-2" id="password" type="password" autocomplete="current-password">
+    <button class="btn btn-primary" type="submit">Sign in to Toyota</button>
+  </form>
+  <form id="code-form" class="mb-3" hidden>
+    <label class="form-label" for="code">Toyota verification code</label>
+    <input class="form-control mb-2" id="code" autocomplete="one-time-code" required>
+    <button class="btn btn-primary" type="submit">Verify code</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <form id="settings-form">
+    <label class="form-label" for="name">Accessory name</label>
+    <input class="form-control mb-2" id="name" required>
+    <label class="form-label" for="vin">Vehicle VIN</label>
+    <input class="form-control mb-3" id="vin" list="vehicles" maxlength="17" pattern="[A-HJ-NPR-Z0-9a-hj-npr-z0-9]{17}" required>
+    <datalist id="vehicles"></datalist>
+    <fieldset class="mb-3">
+      <legend class="fs-6">Show in Apple Home</legend>
+      <div class="form-check">
+        <input class="form-check-input" id="door-lock" type="checkbox">
+        <label class="form-check-label" for="door-lock">Door lock and unlock</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" id="remote-start" type="checkbox">
+        <label class="form-check-label" for="remote-start">Remote start</label>
+      </div>
+    </fieldset>
+    <button class="btn btn-primary" type="submit" disabled>Save Toyota settings</button>
+  </form>
+</div>
+<script src="settings.js"></script>

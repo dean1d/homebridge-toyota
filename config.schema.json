@@ -2,12 +2,12 @@
   "pluginAlias": "Toyota",
   "pluginType": "accessory",
   "singular": true,
+  "customUi": true,
   "schema": {
     "type": "object",
     "required": [
       "name",
-      "vin",
-      "sessionFile"
+      "vin"
     ],
     "properties": {
       "name": {
@@ -19,9 +19,15 @@
         "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
         "title": "Vehicle VIN"
       },
-      "sessionFile": {
-        "type": "string",
-        "title": "Absolute path to the session file created by setup"
+      "showDoorLock": {
+        "type": "boolean",
+        "title": "Show door lock and unlock",
+        "default": true
+      },
+      "showRemoteStart": {
+        "type": "boolean",
+        "title": "Show remote start",
+        "default": true
       }
     }
   }

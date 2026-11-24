@@ -2,13 +2,17 @@
 
 const { isAbsolute } = require('node:path');
 const { ToyotaClient } = require('./toyota');
+const { sessionPath } = require('./settings');
+
+const lockRepeatWindowMs = 30_000;
 
 module.exports = (api) => api.registerAccessory('homebridge-toyota', 'Toyota', Toyota);
 
 class Toyota {
   constructor(log, config, api) {
     const { Service, Characteristic: C, HapStatusError, HAPStatus } = api.hap;
-    const { name, vin, sessionFile } = config;
+    const { name, vin } = config;
+    const sessionFile = config.sessionFile ?? sessionPath(api.user.storagePath());
     const valid = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin)
       && typeof sessionFile === 'string' && isAbsolute(sessionFile);
     const client = valid ? new ToyotaClient(sessionFile) : undefined;
@@ -37,6 +41,7 @@ class Toyota {
       .setCharacteristic(C.SerialNumber, valid ? vin.slice(-8) : 'Toyota');
 
     const lock = new Service.LockMechanism(`${name} Doors`, 'doors');
+    let lastLockWrite;
     let statusRequest;
     const readLock = () => {
       statusRequest ??= call('status').then(({ locked }) => locked).finally(() => {
@@ -51,6 +56,9 @@ class Toyota {
     });
     lock.getCharacteristic(C.LockTargetState)
       .onGet(async () => {
+        if (lastLockWrite?.accepted && performance.now() < lastLockWrite.repeatUntil) {
+          return lastLockWrite.target;
+        }
         const locked = await readLock();
         if (locked === null) throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         return locked ? C.LockTargetState.SECURED : C.LockTargetState.UNSECURED;
@@ -60,7 +68,25 @@ class Toyota {
         if (!secured && value !== C.LockTargetState.UNSECURED) {
           throw new HapStatusError(HAPStatus.INVALID_VALUE_IN_REQUEST);
         }
-        await call(secured ? 'lock' : 'unlock');
+        if (lastLockWrite?.target === value && performance.now() < lastLockWrite.repeatUntil) {
+          return lastLockWrite.result;
+        }
+        if (lastLockWrite?.pending) throw new HapStatusError(HAPStatus.RESOURCE_BUSY);
+        if (statusRequest) await statusRequest.catch(() => {});
+        // Another HomeKit write may have arrived while the status read was pending.
+        if (lastLockWrite?.target === value && performance.now() < lastLockWrite.repeatUntil) {
+          return lastLockWrite.result;
+        }
+        if (this.busy) throw new HapStatusError(HAPStatus.RESOURCE_BUSY);
+        const write = { target: value, pending: true, repeatUntil: Infinity };
+        lastLockWrite = write;
+        write.result = call(secured ? 'lock' : 'unlock').then(() => {
+          write.accepted = true;
+        }).finally(() => {
+          write.pending = false;
+          write.repeatUntil = performance.now() + lockRepeatWindowMs;
+        });
+        return write.result;
       });
 
     const start = new Service.Switch(`${name} Remote Start`, 'remote-start');
@@ -74,7 +100,9 @@ class Toyota {
       }
     });
 
-    this.services = [info, lock, start];
+    this.services = [info];
+    if (config.showDoorLock !== false) this.services.push(lock);
+    if (config.showRemoteStart !== false) this.services.push(start);
   }
 
   getServices() {

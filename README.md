@@ -13,42 +13,32 @@ A Homebridge accessory for Toyota Remote Connect. Apple Home gets a door lock co
 
 ## Installation and setup
 
-Run these commands on the machine that runs Homebridge. Use a private session directory accessible to the user account running the Homebridge service.
+Install **Toyota Remote Connect** from the Homebridge Plugins tab and open its settings.
 
-Windows PowerShell:
+1. Enter your Toyota account email and password, then select **Sign in to Toyota**. Enter the verification code if Toyota requests one.
+2. Select the VIN for your vehicle. If Toyota returns one vehicle, its VIN is filled in automatically.
+3. Under **Show in Apple Home**, choose **Door lock and unlock**, **Remote start**, or both. Both controls are enabled by default.
+4. Select **Save Toyota settings** and restart Homebridge.
 
-```powershell
-npm.cmd install -g homebridge-toyota
-$session = Join-Path $env:LOCALAPPDATA 'homebridge-toyota/session.json'
-homebridge-toyota-login.cmd $session
-```
+Toyota credentials are used for sign-in. The plugin saves the resulting session under Homebridge's storage directory, where it can refresh the session as needed. Keep that session file private.
 
-macOS or Linux:
+Existing installations can keep using their configured session file. To switch to automatic storage, sign in through the plugin settings, then save and restart Homebridge.
 
-```sh
-npm install -g homebridge-toyota
-homebridge-toyota-login "$HOME/.homebridge-toyota/session.json"
-```
+## Manual configuration
 
-Enter your Toyota credentials and, if prompted, the verification code. The command saves a local session file and lists the vehicles on your account. Keep that file private. It contains tokens that can access your Toyota account, and the plugin refreshes them as needed.
-
-If you're upgrading from 0.1.0, keep your existing `sessionFile` and `vin`. Remove the `python` and `clientDirectory` fields from the accessory configuration. If Toyota requires a fresh sign-in, stop Homebridge, run the login command with your existing session path, and then restart Homebridge.
-
-
-## Configuration
-
-Add one entry to the existing Homebridge `accessories` array. Use the VIN listed by the login command and the absolute session file path from setup. In JSON, use forward slashes for Windows paths or escape each backslash.
+Add an entry to the existing Homebridge `accessories` array. The default session lives at `homebridge-toyota/session.json` under Homebridge's storage directory. For installations without the Homebridge UI, run `homebridge-toyota-login` with the absolute path to that file.
 
 ```json
 {
   "accessory": "Toyota",
   "name": "Sienna",
   "vin": "YOUR_17_CHARACTER_VIN",
-  "sessionFile": "/absolute/path/to/session.json"
+  "showDoorLock": true,
+  "showRemoteStart": true
 }
 ```
 
-Restart Homebridge and open Apple Home. Test the door lock with the Sienna in view. Test remote start outdoors with the vehicle empty. The start switch resets after the request, and vehicle state can be verified in the Toyota app. If Apple Home times out, check the Toyota app before trying again. Keep the remote-start switch out of unattended automations.
+Restart Homebridge and open Apple Home. Test the door lock with the Sienna in view. Test remote start outdoors with the vehicle empty. The start switch resets after the request. If Apple Home times out, check the Toyota app before trying again. Keep the remote-start switch out of unattended automations.
 
 
 ## Support

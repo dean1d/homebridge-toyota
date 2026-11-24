@@ -203,7 +203,15 @@ class ToyotaClient {
     }
     const result = await this.api(gateway + path, 'command', vehicle, body);
     if (result.returnCode && result.returnCode !== 'ONE-RES-10000') {
-      throw new Error('Toyota refused the remote command.');
+      const code = String(result.returnCode);
+      const safeCode = /^ONE-[A-Z]{2,8}-[0-9]{4,6}$/.test(code) ? ` (${code})` : '';
+      if (action !== 'start') {
+        // A rejected-looking reply may still have changed the vehicle. Read only;
+        // never submit a second command to resolve an ambiguous outcome.
+        const status = await this.run(vin, 'status').catch(() => null);
+        if (status?.locked === (action === 'lock')) return;
+      }
+      throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
     }
   }
 

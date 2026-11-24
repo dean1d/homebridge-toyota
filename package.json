@@ -1,6 +1,6 @@
 {
   "name": "homebridge-toyota",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Toyota Remote Connect for Homebridge",
   "main": "index.js",
   "keywords": [
@@ -20,6 +20,8 @@
     "auth.js",
     "toyota.js",
     "login.js",
+    "settings.js",
+    "homebridge-ui",
     "config.schema.json",
     "README.md",
     "LICENSE"
@@ -54,5 +56,8 @@
   },
   "bin": {
     "homebridge-toyota-login": "login.js"
+  },
+  "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.3.0"
   }
 }
