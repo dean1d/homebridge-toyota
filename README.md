@@ -7,9 +7,9 @@ A Homebridge accessory for Toyota Remote Connect. Apple Home gets a door lock co
 
 ## Requirements
 
-- Node.js 22 or 24 and Homebridge 1.8 or 2.x.
+- Node.js 22.x, 24.x, or 26.13.1 and later in the 26.x series. Requires Homebridge 1.8 or 2.x.
 - A compatible North American Toyota and an active Toyota Remote Connect subscription.
-- Version 0.2.0 runs entirely in Node.js. Live testing with the 2026 Sienna is pending.
+- Version 0.2.0 and later run entirely in Node.js. Homebridge accessory controls were tested with simulated Toyota responses on Node.js 26.13.1. Live testing with the 2026 Sienna is pending.
 
 ## Installation and setup
 
