@@ -7,8 +7,6 @@
     "required": [
       "name",
       "vin",
-      "python",
-      "clientDirectory",
       "sessionFile"
     ],
     "properties": {
@@ -20,14 +18,6 @@
         "type": "string",
         "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
         "title": "Vehicle VIN"
-      },
-      "python": {
-        "type": "string",
-        "title": "Absolute path to the Python virtual environment interpreter"
-      },
-      "clientDirectory": {
-        "type": "string",
-        "title": "Absolute path to upstream custom_components/toyota_na"
       },
       "sessionFile": {
         "type": "string",

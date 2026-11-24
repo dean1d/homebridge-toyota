@@ -1,6 +1,6 @@
 {
   "name": "homebridge-toyota",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Toyota Remote Connect for Homebridge",
   "main": "index.js",
   "keywords": [
@@ -17,8 +17,9 @@
   },
   "files": [
     "index.js",
-    "toyota.py",
-    "requirements.txt",
+    "auth.js",
+    "toyota.js",
+    "login.js",
     "config.schema.json",
     "README.md",
     "LICENSE"
@@ -50,5 +51,8 @@
   ],
   "publishConfig": {
     "access": "public"
+  },
+  "bin": {
+    "homebridge-toyota-login": "login.js"
   }
 }
