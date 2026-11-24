@@ -1,0 +1,54 @@
+{
+  "name": "homebridge-toyota",
+  "version": "0.1.0",
+  "description": "Toyota Remote Connect for Homebridge",
+  "main": "index.js",
+  "keywords": [
+    "homebridge-plugin",
+    "supports-hap",
+    "toyota",
+    "sienna",
+    "remote-connect",
+    "homekit"
+  ],
+  "engines": {
+    "node": "^22 || ^24",
+    "homebridge": "^1.8.0 || ^2.0.0"
+  },
+  "files": [
+    "index.js",
+    "toyota.py",
+    "requirements.txt",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "dean1d",
+  "displayName": "Toyota Remote Connect",
+  "license": "MIT",
+  "repository": {
+    "url": "git+https://github.com/dean1d/homebridge-toyota.git",
+    "type": "git"
+  },
+  "homepage": "https://github.com/dean1d/homebridge-toyota#readme",
+  "bugs": {
+    "url": "https://github.com/dean1d/homebridge-toyota/issues"
+  },
+  "funding": [
+    {
+      "type": "buymeacoffee",
+      "url": "https://buymeacoffee.com/dean1d"
+    },
+    {
+      "type": "other",
+      "url": "https://cash.app/$dkoenigBOA"
+    },
+    {
+      "type": "other",
+      "url": "https://venmo.com/u/Dean1d"
+    }
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

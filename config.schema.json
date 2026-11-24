@@ -1,0 +1,38 @@
+{
+  "pluginAlias": "Toyota",
+  "pluginType": "accessory",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "required": [
+      "name",
+      "vin",
+      "python",
+      "clientDirectory",
+      "sessionFile"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "default": "Sienna"
+      },
+      "vin": {
+        "type": "string",
+        "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+        "title": "Vehicle VIN"
+      },
+      "python": {
+        "type": "string",
+        "title": "Absolute path to the Python virtual environment interpreter"
+      },
+      "clientDirectory": {
+        "type": "string",
+        "title": "Absolute path to upstream custom_components/toyota_na"
+      },
+      "sessionFile": {
+        "type": "string",
+        "title": "Absolute path to the session file created by setup"
+      }
+    }
+  }
+}
