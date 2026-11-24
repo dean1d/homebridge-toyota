@@ -1,6 +1,6 @@
 {
   "name": "homebridge-toyota",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Toyota Remote Connect for Homebridge",
   "main": "index.js",
   "keywords": [

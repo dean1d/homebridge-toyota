@@ -2,6 +2,7 @@
 
 const { randomUUID } = require('node:crypto');
 const { on, once } = require('node:events');
+const { setTimeout: sleep } = require('node:timers/promises');
 const { Session, request } = require('./auth');
 
 const gateway = 'https://onecdn.telematicsct.com';
@@ -31,7 +32,11 @@ const commands = {
   lock: { name: 'door-lock', code: 'DL', value: 1 },
   unlock: { name: 'door-unlock', code: 'DL', value: 2 },
   start: { name: 'engine-start', code: 'RES', value: 1 },
+  stop: { name: 'engine-stop', code: 'RES', value: 2 },
 };
+const confirmWindowMs = 60_000;
+const vehicleCacheMs = 10 * 60_000;
+const confirmPollMs = 5_000;
 const doors = new Set(['driver side door', 'passenger side door', 'driver side rear door', 'passenger side rear door']);
 const graphDoors = ['driverSide', 'passengerSide', 'rearDriverSide', 'rearPassengerSide'];
 
@@ -81,7 +86,7 @@ function checkCommand(vehicle, action) {
     || (vehicle.features && vehicle.features.remoteCommands !== 1)) {
     throw new Error('Toyota reports remote commands unavailable for this vehicle.');
   }
-  const keys = action === 'start'
+  const keys = ['start', 'stop'].includes(action)
     ? ['estartEnabled', 'estartStopCapable', 'remoteEngineStartStop']
     : ['dlockUnlockCapable', 'doorLockUnlockCapable'];
   const reported = keys.flatMap((key) => [
@@ -120,7 +125,7 @@ class ToyotaClient {
     this.session = new Session(sessionFile, fetch);
   }
 
-  async api(url, method, vehicle, body, graphRequest = false) {
+  async api(url, vehicle, body, graphRequest = false) {
     let session = await this.session.get();
     for (let attempt = 0; attempt < 2; attempt++) {
       const headers = authenticatedHeaders(session, vehicle);
@@ -141,10 +146,10 @@ class ToyotaClient {
         ['APIGW-403', 'APPSYNC-AUTH-403'].includes(error?.errorType ?? error?.extensions?.code)
         || /^unauthorized$|jwt expired/i.test(error?.message ?? '')
       ));
+      // An auth rejection means Toyota never ran the request, so one retry is safe for commands too.
       if (authRejected && attempt === 0) {
         session = await this.session.get(session.tokens.access_token);
-        if (method === 'read') continue;
-        throw new Error('Toyota refreshed your session. Check the Toyota app before retrying.');
+        continue;
       }
       if (!response.ok || errors.length || !data) {
         throw new Error(`Toyota rejected the request (HTTP ${response.status}).`);
@@ -154,8 +159,10 @@ class ToyotaClient {
   }
 
   async vehicles() {
-    const vehicles = await this.api(gateway + '/oneapi/v2/vehicle/guid', 'read');
+    if (this.vehicleCache && performance.now() < this.vehicleCache.until) return this.vehicleCache.list;
+    const vehicles = await this.api(gateway + '/oneapi/v2/vehicle/guid');
     if (!Array.isArray(vehicles)) throw new Error('Toyota did not return a vehicle list.');
+    this.vehicleCache = { list: vehicles, until: performance.now() + vehicleCacheMs };
     return vehicles;
   }
 
@@ -172,7 +179,7 @@ class ToyotaClient {
 
     if (action === 'status') {
       if (appSync) {
-        const data = await this.api(graph, 'read', { ...vehicle, backdoorType: vehicle.backdoorType || 'hatch' }, {
+        const data = await this.api(graph, { ...vehicle, backdoorType: vehicle.backdoorType || 'hatch' }, {
           operationName: 'GetVehicleStatus', query: statusQuery, variables: { vin },
         }, true);
         const reported = data?.getVehicleStatus;
@@ -182,7 +189,7 @@ class ToyotaClient {
       }
       const path = route ? '/v1/remote/route/status'
         : legacy ? '/oneapi/v2/legacy/remote/status' : '/oneapi/v1/global/remote/status';
-      return { locked: restDoorLocks(await this.api(gateway + path, 'read', vehicle)) };
+      return { locked: restDoorLocks(await this.api(gateway + path, vehicle)) };
     }
 
     if (!Object.hasOwn(commands, action)) throw new Error('Unsupported Toyota command.');
@@ -201,15 +208,18 @@ class ToyotaClient {
         command: { code: command.code, value: command.value },
       };
     }
-    const result = await this.api(gateway + path, 'command', vehicle, body);
+    const result = await this.api(gateway + path, vehicle, body);
     if (result.returnCode && result.returnCode !== 'ONE-RES-10000') {
       const code = String(result.returnCode);
-      const safeCode = /^ONE-[A-Z]{2,8}-[0-9]{4,6}$/.test(code) ? ` (${code})` : '';
-      if (action !== 'start') {
-        // A rejected-looking reply may still have changed the vehicle. Read only;
+      const safeCode = /^[\w-]{1,32}$/.test(code) ? ` (${code})` : '';
+      if (['lock', 'unlock'].includes(action)) {
+        // Toyota often replies before the vehicle acts (~30s), so poll status. Read only;
         // never submit a second command to resolve an ambiguous outcome.
-        const status = await this.run(vin, 'status').catch(() => null);
-        if (status?.locked === (action === 'lock')) return;
+        for (let waited = 0; waited <= confirmWindowMs; waited += confirmPollMs) {
+          if (waited) await sleep(confirmPollMs);
+          const status = await this.run(vin, 'status').catch(() => null);
+          if (status?.locked === (action === 'lock')) return;
+        }
       }
       throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
     }
@@ -262,7 +272,7 @@ class ToyotaClient {
       await waitFor((message) => message.type === 'start_ack' && message.id === id);
       clearTimeout(timer);
       timer = setTimeout(disconnected, 80_000);
-      const data = await this.api(graph, 'command', vehicle, {
+      const data = await this.api(graph, vehicle, {
         operationName: 'SendRemoteCommand', query: commandQuery,
         variables: { command, autoFixCommands: [] },
       }, true);

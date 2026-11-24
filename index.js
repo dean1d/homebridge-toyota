@@ -5,6 +5,7 @@ const { ToyotaClient } = require('./toyota');
 const { sessionPath } = require('./settings');
 
 const lockRepeatWindowMs = 30_000;
+const statusCacheMs = 30_000;
 
 module.exports = (api) => api.registerAccessory('homebridge-toyota', 'Toyota', Toyota);
 
@@ -22,8 +23,10 @@ class Toyota {
         log.error('Configure a valid VIN and an absolute Toyota session file path.');
         throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       }
-      if (this.busy) throw new HapStatusError(HAPStatus.RESOURCE_BUSY);
-      this.busy = true;
+      // Status reads are read-only, so only commands take the busy flag.
+      const command = action !== 'status';
+      if (command && this.busy) throw new HapStatusError(HAPStatus.RESOURCE_BUSY);
+      if (command) this.busy = true;
       try {
         return await client.run(vin, action);
       } catch (error) {
@@ -31,20 +34,25 @@ class Toyota {
         log.error(`Toyota ${action} failed. ${detail}`);
         throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
       } finally {
-        this.busy = false;
+        if (command) this.busy = false;
       }
     };
 
     const info = new Service.AccessoryInformation()
       .setCharacteristic(C.Manufacturer, 'Toyota')
-      .setCharacteristic(C.Model, 'Sienna')
+      .setCharacteristic(C.Model, 'Toyota')
       .setCharacteristic(C.SerialNumber, valid ? vin.slice(-8) : 'Toyota');
 
     const lock = new Service.LockMechanism(`${name} Doors`, 'doors');
     let lastLockWrite;
     let statusRequest;
-    const readLock = () => {
-      statusRequest ??= call('status').then(({ locked }) => locked).finally(() => {
+    let lastStatus;
+    const readLock = async () => {
+      if (lastStatus && performance.now() < lastStatus.until) return lastStatus.locked;
+      statusRequest ??= call('status').then(({ locked }) => {
+        lastStatus = { locked, until: performance.now() + statusCacheMs };
+        return locked;
+      }).finally(() => {
         statusRequest = undefined;
       });
       return statusRequest;
@@ -83,26 +91,39 @@ class Toyota {
         write.result = call(secured ? 'lock' : 'unlock').then(() => {
           write.accepted = true;
         }).finally(() => {
+          lastStatus = undefined;
           write.pending = false;
           write.repeatUntil = performance.now() + lockRepeatWindowMs;
         });
         return write.result;
       });
 
-    const start = new Service.Switch(`${name} Remote Start`, 'remote-start');
-    start.getCharacteristic(C.On).onGet(() => false).onSet(async (on) => {
-      if (!on) return;
-      try {
-        await call('start');
-      } finally {
-        const reset = setTimeout(() => start.updateCharacteristic(C.On, false), 200);
-        reset.unref();
-      }
-    });
+    const momentary = (label, subtype, action) => {
+      const service = new Service.Switch(`${name} ${label}`, subtype);
+      service.getCharacteristic(C.On).onGet(() => false).onSet(async (on) => {
+        if (!on) return;
+        try {
+          await call(action);
+        } finally {
+          const reset = setTimeout(() => service.updateCharacteristic(C.On, false), 200);
+          reset.unref();
+        }
+      });
+      return service;
+    };
+    const start = momentary('Remote Start', 'remote-start', 'start');
+    const stop = momentary('Remote Stop', 'remote-stop', 'stop');
+
+    if (valid) {
+      client.vehicles().then((vehicles) => {
+        const model = vehicles.find((vehicle) => vehicle?.vin === vin)?.modelName;
+        if (typeof model === 'string' && model.trim()) info.updateCharacteristic(C.Model, model.trim());
+      }).catch(() => {});
+    }
 
     this.services = [info];
     if (config.showDoorLock !== false) this.services.push(lock);
-    if (config.showRemoteStart !== false) this.services.push(start);
+    if (config.showRemoteStart !== false) this.services.push(start, stop);
   }
 
   getServices() {
