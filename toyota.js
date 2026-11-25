@@ -331,8 +331,11 @@ class ToyotaClient {
           return;
         }
       }
+      throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
     }
-    throw new Error(`Toyota did not confirm the remote command${safeCode}.`);
+    // Nothing in Toyota's status shows this command's result, and Toyota sends this reply before
+    // the vehicle acts. Reporting it as failed invites HomeKit to resend, so count it as sent.
+    note(`Toyota replied${safeCode} to ${command.name}; Toyota reports no status for it, so it counts as sent.`);
   }
 
   async appSyncCommand(vehicle, command, note) {

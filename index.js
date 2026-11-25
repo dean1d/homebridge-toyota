@@ -98,8 +98,22 @@ class Toyota {
       return statusRequest;
     };
     const readLock = async () => (await readStatus()).locked;
-    // A command sent from Home changes the vehicle; read fresh status afterwards.
-    const send = (action) => call(action).finally(() => { lastStatus = undefined; });
+    // HomeKit can repeat a write (retries, double taps, scenes). Never resend the same command
+    // to the vehicle within the window; a command also invalidates the cached status.
+    let lastSend;
+    const send = (action) => {
+      if (lastSend?.action === action && performance.now() < lastSend.until) {
+        log.info(`Ignored a repeated ${action} request from HomeKit.`);
+        return lastSend.result;
+      }
+      const entry = { action, until: Infinity };
+      entry.result = call(action).finally(() => {
+        lastStatus = undefined;
+        entry.until = performance.now() + lockRepeatWindowMs;
+      });
+      lastSend = entry;
+      return entry.result;
+    };
     lock.getCharacteristic(C.LockCurrentState).onGet(async () => {
       const locked = await readLock();
       if (locked === null) return C.LockCurrentState.UNKNOWN;
